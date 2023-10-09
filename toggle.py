@@ -14,7 +14,7 @@ from time import sleep
 load_dotenv()
 
 IMPLICIT_WAIT = 6  # seconds wait for finding elements
-EXPLICIT_HACKY_CRAPPY_WAIT = 5
+EXPLICIT_HACKY_CRAPPY_WAIT = 2
 
 ROUTER_IP = os.getenv("ROUTER_IP")
 ROUTER_USERNAME = os.getenv("ROUTER_USERNAME")
@@ -118,30 +118,31 @@ class WifiToggle:
     def check(self):
         try:
             self._init_driver()
-            self._check()
+            self._check_status()
         except Exception as e:
             print("Error: ", e)
         finally:
             self._driver.quit()
 
-    def _check(self):
+    def _check_status(self):
         print("Logging into router...")
         # Login to the router's interface
         self._driver.switch_to.window(self._router_handle)
         self._driver.get(self.router_page.url)
         self.router_page.login(self._driver, self.router_username, self.router_password)
-        router_status = "on" if self.router_page.wifi_on(self._driver) else "off"
+        router_status = self.router_page.wifi_on(self._driver)
 
         print("Logging into extension...")
         # Login to the extension's interface
         self._driver.switch_to.window(self._extension_handle)
         self._driver.get(self.extension_page.url)
         self.extension_page.login(self._driver, self.extension_password)
-        extension_status = "on" if self.extension_page.wifi_on(self._driver) else "off"
+        extension_status = self.extension_page.wifi_on(self._driver)
 
         print(
             "Currently: router wifi is {router_status}; extension wifi is {extension_status}".format(
-                router_status=router_status, extension_status=extension_status
+                router_status="on" if router_status else "off",
+                extension_status="on" if extension_status else "off",
             )
         )
 
@@ -159,9 +160,9 @@ class WifiToggle:
     def _toggle(self):
         print("Toggling wifi...")
 
-        router_status, extension_status = self._check()
+        router_status, extension_status = self._check_status()
 
-        if router_status == "on" and extension_status == "off":
+        if router_status and not extension_status:
             print("Turning extension wifi on...")
             self._driver.switch_to.window(self._extension_handle)
             self.extension_page.turn_wifi_on(self._driver)
@@ -171,7 +172,7 @@ class WifiToggle:
             print("Turning router wifi off...")
             self._driver.switch_to.window(self._router_handle)
             self.router_page.turn_wifi_off(self._driver)
-        elif router_status == "off" and extension_status == "on":
+        elif not router_status and extension_status:
             print("Turning router wifi on...")
             self._driver.switch_to.window(self._router_handle)
             self.router_page.turn_wifi_on(self._driver)
@@ -267,19 +268,7 @@ class ExtensionPage:
         driver.find_element(By.ID, self.login_b_id).click()
 
     def wifi_on(self, driver):
-        driver.find_element(By.XPATH, self.wifi_settings_xpath).click()
-
-        # wait for the wifi frame to refresh
-        sleep(EXPLICIT_HACKY_CRAPPY_WAIT)
-        wait = WebDriverWait(driver, IMPLICIT_WAIT)
-        wait.until(EC.visibility_of_element_located((By.ID, self.wifi_frame_div_id)))
-        # the wifi toggle is in an iframe
-        wait = WebDriverWait(driver, IMPLICIT_WAIT)
-        wait.until(
-            EC.frame_to_be_available_and_switch_to_it(
-                (By.ID, self.wifi_settings_iframe_id)
-            )
-        )
+        self._navigate_to_wifi_settings(driver)
         wifi_toggle_el = driver.find_element(By.ID, self.wifi_toggle_id)
         wifi_toggle_class = wifi_toggle_el.get_attribute("class")
         # switch back to the default content
@@ -290,20 +279,17 @@ class ExtensionPage:
     def turn_wifi_on(self, driver):
         if not self.wifi_on(driver):
             self._toggle_wifi(driver)
-            sleep(EXPLICIT_HACKY_CRAPPY_WAIT)
+            # only wait in the ON method, since the OFF method will close the connection
+            # before updating the status
             wait = WebDriverWait(driver, 10)
             wait.until(EC.text_to_be_present_in_element((By.ID, "ajax-massage"), "OK"))
 
     def turn_wifi_off(self, driver):
         if self.wifi_on(driver):
             self._toggle_wifi(driver)
-            sleep(EXPLICIT_HACKY_CRAPPY_WAIT)
 
     def _toggle_wifi(self, driver):
-        driver.find_element(By.XPATH, self.wifi_settings_xpath).click()
-
-        # the wifi toggle is in an iframe
-        driver.switch_to.frame(self.wifi_settings_iframe_id)
+        self._navigate_to_wifi_settings(driver)
         wifi_toggle_el = driver.find_element(By.ID, self.wifi_toggle_id)
         wifi_toggle_el.click()
         # switch back to the default content
@@ -311,6 +297,26 @@ class ExtensionPage:
 
         # apply the change and report the status
         driver.find_element(By.ID, self.confirm_b_id).click()
+
+    def _navigate_to_wifi_settings(self, driver):
+        """Makes sure to return to the default content after calling this
+        method by calling driver.switch_to.default_content()"""
+
+        driver.find_element(By.XPATH, self.wifi_settings_xpath).click()
+
+        # wait for the wifi frame to refresh
+        wait = WebDriverWait(driver, IMPLICIT_WAIT)
+        wait.until(EC.visibility_of_element_located((By.ID, self.wifi_frame_div_id)))
+        # the wifi toggle is in an iframe
+        wait = WebDriverWait(driver, IMPLICIT_WAIT)
+        wait.until(
+            EC.frame_to_be_available_and_switch_to_it(
+                (By.ID, self.wifi_settings_iframe_id)
+            )
+        )
+        # there is a weird behavior in the extension web page where the settings page
+        # first loads with the wifi toggle on, then it refreshes with the correct
+        sleep(EXPLICIT_HACKY_CRAPPY_WAIT)
 
 
 if __name__ == "__main__":
@@ -331,6 +337,7 @@ if __name__ == "__main__":
         extension_ip=args.extension_ip,
         extension_password=args.extension_password,
     )
+
     if args.check:
         print("Checking wifi status...")
         wifi_toggle.check()
