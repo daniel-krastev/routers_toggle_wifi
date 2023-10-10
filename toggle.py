@@ -77,6 +77,12 @@ parser.add_argument(
     help="Do not run the chrome driver in headless mode.",
     action="store_true",
 )
+parser.add_argument(
+    "-w",
+    "--wait",
+    help="Wait for confirmation before exiting.",
+    action="store_true",
+)
 
 
 class WifiToggle:
@@ -344,4 +350,5 @@ if __name__ == "__main__":
     else:
         wifi_toggle.toggle()
 
-    input("\nPress enter to exit...")
+    if args.wait:
+        input("Press Enter to continue...")
