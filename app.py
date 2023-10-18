@@ -6,6 +6,9 @@ app = Flask(__name__)
 html_template = """<html>
 <head>
 <style>
+body {{
+    background-color: #282828;
+    }}
 .button {{
     background-color: #4CAF50; /* Green */
     border: none;
